@@ -1,0 +1,69 @@
+/*****************************************************************************************
+* DispatchMsgService - 负责分发消息服务模块，其实就是把外部收到的消息，转化成内部事件，
+* 也就是data->msg->event的解码过程，然后再把事件投递至线程池的消息队列，
+* 由线程池调用其process 方法对事件进行处理，最终调用每个event的handler方法来处理event，
+* 此时每个event handler需要subscribe该event后才会被调用到.
+******************************************************************************************/
+
+#ifndef _BRKS_SERVICE_DISPATCH_EVENT_SERVICE_H_
+#define _BRKS_SERVICE_DISPATCH_EVENT_SERVICE_H_
+
+#include <map>
+#include <vector>
+#include <queue>
+#include "ievent.h"
+#include "eventtype.h"
+#include "iEventHandler.h"
+#include "threadpool/thread_pool.h"
+#include "NetworkInterface.h"
+
+class DispatchMsgService
+{
+protected:
+	DispatchMsgService();  // 只有自己或者子类能访问     确保不会构造两个 DispatchMsgService 对象
+
+public:
+	virtual ~DispatchMsgService();
+
+	virtual BOOL open();    // 打开服务
+	virtual void close();   // 关闭服务
+
+	virtual void subscribe(u32 eid, iEventHandler* handler);
+	virtual void unsubscribe(u32 eid, iEventHandler* handler);
+
+	// 把事件投递到线程吃中进行处理
+	virtual i32 enqueue(iEvent* ev);
+
+	// 线程池回调函数  (加了static 函数不会默认有this指针)
+	static void svc(void* argv);
+
+	// 对具体的事件进行分发处理
+	virtual std::vector<iEvent*> process(const iEvent* ev);
+
+	static DispatchMsgService* getInstance();
+
+	iEvent* parseEvent(const char* message, u32 len, u16 eid);
+
+	void handleAllResponseEvent(NetworkInterface* interface);
+
+private:
+	void handleResponseEvent(NetworkInterface* interface, iEvent* ev, u32 evId);
+
+protected:
+
+	thread_pool_t* tp_;
+	static DispatchMsgService* DMS_;
+	typedef std::vector<iEventHandler*> T_EventHandlers;
+	typedef std::map<u32, T_EventHandlers> T_EventHandlersMap;
+	T_EventHandlersMap subscribers_;
+
+	bool svr_exit_;
+
+	static pthread_mutex_t queue_mutex_;    // 锁 response_events 队列
+	static std::queue<iEvent*> response_events_;  // 响应队列
+
+};
+
+
+
+#endif // !_BRKS_SERVICE_DISPATCH_EVENT_SERVICE_H_

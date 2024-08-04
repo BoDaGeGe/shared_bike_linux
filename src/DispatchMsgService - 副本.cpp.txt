@@ -1,0 +1,265 @@
+#include <algorithm>
+#include "DispatchMsgService.h"
+#include "NetworkInterface.h"
+#include "bike.pb.h"
+#include "events_def.h"
+
+DispatchMsgService* DispatchMsgService::DMS_ = nullptr;
+pthread_mutex_t DispatchMsgService::queue_mutex_;    // 锁 response_events 队列
+std::queue<iEvent*> DispatchMsgService::response_events_;
+
+DispatchMsgService::DispatchMsgService() : tp_(NULL)
+{
+
+}
+
+DispatchMsgService::~DispatchMsgService()
+{
+
+}
+
+
+BOOL DispatchMsgService::open()
+{
+	svr_exit_ = FALSE;
+	thread_mutex_create(&queue_mutex_);
+
+	tp_ = thread_pool_init();
+	return tp_ ? TRUE : FALSE;
+}
+
+void DispatchMsgService::close()
+{
+	svr_exit_ = TRUE;
+	thread_pool_destroy(tp_);
+
+	thread_mutex_destroy(&queue_mutex_);
+	subscribers_.clear();
+
+	tp_ = NULL;
+}
+
+DispatchMsgService* DispatchMsgService::getInstance()
+{
+	if (DMS_ == nullptr)
+	{
+		DMS_ = new DispatchMsgService();
+	}
+
+	return DMS_;
+}
+
+void DispatchMsgService::svc(void* argv)
+{
+	DispatchMsgService* dms = DispatchMsgService::getInstance();
+	iEvent* ev = (iEvent*)argv;
+	if (!dms->svr_exit_)
+	{
+		LOG_DEBUG("DispatchMsgService::svc ...\n");
+		std::vector<iEvent*> rspIEventVec = dms->process(ev);
+		for (int i = 0; i < rspIEventVec.size(); i++)
+		{
+			LOG_DEBUG("DispatchMsgService::svc test1 ...\n");
+			if (rspIEventVec[i])
+			{
+				rspIEventVec[i]->dump(std::cout);
+				rspIEventVec[i]->set_args(ev->get_args());
+				LOG_DEBUG("DispatchMsgService::svc test2 ...\n");
+			}
+			else
+			{
+				// 生成终止响应事件
+				LOG_DEBUG("DispatchMsgService::svc end ...\n");
+				rspIEventVec[i] = new ExitRspEv();
+				rspIEventVec[i]->set_args(ev->get_args());
+			}
+
+			thread_mutex_lock(&queue_mutex_);
+			LOG_DEBUG("DispatchMsgService::svc test3 ...\n");
+			response_events_.push(rspIEventVec[i]);
+			LOG_DEBUG("DispatchMsgService::svc test4 ...\n");
+			thread_mutex_unlock(&queue_mutex_);
+
+			//delete rspIEventVec[i];
+		}
+		LOG_DEBUG("DispatchMsgService::svc test5 ...\n");
+	}
+	LOG_DEBUG("DispatchMsgService::svc test6 ...\n");
+}
+
+i32 DispatchMsgService::enqueue(iEvent* ev)
+{
+	if (NULL == ev)
+	{
+		return -1;
+	}
+
+	thread_task_t* task = thread_task_alloc(0);
+
+	task->handler = DispatchMsgService::svc;
+	task->ctx = ev;
+	LOG_DEBUG("DispatchMsgService::enqueue test ...\n");
+	return thread_task_post(tp_, task);
+}
+
+void DispatchMsgService::subscribe(u32 eid, iEventHandler* handler)
+{
+	LOG_DEBUG("DispatchMsgService::subscribe eid: %u\n", eid);
+	T_EventHandlersMap::iterator iter = subscribers_.find(eid);
+	if (iter != subscribers_.end())
+	{
+		T_EventHandlers::iterator hd1_iter = std::find(iter->second.begin(), iter->second.end(), handler);
+		if (hd1_iter == iter->second.end())
+		{
+			iter->second.push_back(handler);
+		}
+	}
+	else
+	{
+		subscribers_[eid].push_back(handler);
+	}
+}
+
+void DispatchMsgService::unsubscribe(u32 eid, iEventHandler* handler)
+{
+	T_EventHandlersMap::iterator iter = subscribers_.find(eid);
+	if (iter != subscribers_.end())
+	{
+		T_EventHandlers::iterator hd1_iter = std::find(iter->second.begin(), iter->second.end(), handler);
+		if (hd1_iter != iter->second.end())
+		{
+			iter->second.erase(hd1_iter);
+		}
+	}
+}
+
+std::vector<iEvent*> DispatchMsgService::process(const iEvent* ev)
+{
+	std::vector<iEvent*> rspIEventVec;
+	LOG_DEBUG("DispatchMsgService::process -ev: %p\n", ev);
+
+	if (NULL == ev)
+	{
+		return rspIEventVec;
+	}
+
+	u32 eid = ev->get_eid();
+	LOG_DEBUG("DispatchMsgService::process -eid: %u\n", eid);
+
+	if (EEVENTID_UNKOWN == eid)
+	{
+		LOG_WARN("DispatchMsgService : unknow event id %d", eid);
+		return rspIEventVec;
+	}
+
+	T_EventHandlersMap::iterator handlers = subscribers_.find(eid);
+	if (handlers == subscribers_.end())
+	{
+		LOG_WARN("DispatchMsgService : no way event handler subscribed %d", eid);
+		return rspIEventVec;
+	}
+
+	iEvent* rsp = NULL;
+	for (auto iter = handlers->second.begin(); iter != handlers->second.end(); iter++)
+	{
+		iEventHandler* handler = *iter;
+		LOG_DEBUG("DispatchMsgService : get handler : %s\n", handler->get_name().c_str());
+
+		rsp = handler->handle(ev);
+		rspIEventVec.push_back(rsp);
+	}
+
+	//rspIEventVec.push_back(NULL);
+
+	return rspIEventVec;
+}
+
+iEvent* DispatchMsgService::parseEvent(const char* message, u32 len, u16 eid)
+{
+	if (!message)
+	{
+		LOG_ERROR("DispatchMsgService::parseEvent - message is null [eid: %d].\n", eid);
+		return nullptr;
+	}
+
+	if (EEVENTID_GET_MOBLIE_CODE_REQ == eid)
+	{
+		tutorial::mobile_request mr;
+		if (mr.ParseFromArray(message, len))
+		{
+			MobileCodeReqEv* ev = new MobileCodeReqEv(mr.mobile());
+			return ev;
+		}
+	}
+	else if (EEVENTID_LOGIN_REQ == eid)
+	{
+		tutorial::login_request lr;
+		if (lr.ParseFromArray(message, len))
+		{
+			LoginReqEv* ev = new LoginReqEv(lr.mobile(), lr.icode());
+			return ev;
+		}
+	}
+
+	return nullptr;
+}
+
+void DispatchMsgService::handleAllResponseEvent(NetworkInterface* interface)
+{
+	bool bDone = false;
+
+	while (!bDone)
+	{
+		iEvent* ev = nullptr;
+		thread_mutex_lock(&queue_mutex_);
+		if (!response_events_.empty())
+		{
+			ev = response_events_.front();
+			response_events_.pop();
+		}
+		else
+		{
+			bDone = true;
+		}
+		thread_mutex_unlock(&queue_mutex_);
+
+		if (!bDone)
+		{
+			if ((EEVENTID_GET_MOBLIE_CODE_RSP == ev->get_eid()) || 
+				(EEVENTID_LOGIN_RSP == ev->get_eid()))
+			{
+				handleResponseEvent(interface, ev, ev->get_eid());
+				LOG_DEBUG("DispatchMsgService::handleAllResponseEvent test ...\n");
+			}
+			else if (EEVENTID_EXIT_RSP == ev->get_eid())
+			{
+				LOG_DEBUG("DispatchMsgService::handleAllResponseEvent test EEVENTID_EXIT_RSP ...\n");
+				ConnectSession* cs = (ConnectSession*)ev->get_args();
+				cs->response = ev;
+				cs->write_buf = new char[cs->message_len + MESSAGE_HEADER_LEN];
+				interface->send_response_message(cs);
+			}
+		}
+	}
+}
+
+void DispatchMsgService::handleResponseEvent(NetworkInterface* interface, iEvent* ev, u32 evId)
+{
+	LOG_DEBUG("DispatchMsgService::handleAllResponseEvent - id: %s\n", evId);
+
+	ConnectSession* cs = (ConnectSession*)ev->get_args();
+	cs->response = ev;
+
+	// 系统化请求数据
+	cs->message_len = ev->ByteSize();
+	cs->write_buf = new char[cs->message_len + MESSAGE_HEADER_LEN];
+
+	// 组装头部
+	memcpy(cs->write_buf, MESSAGE_HEADER_ID, 4);
+	*(u16*)(cs->write_buf + 4) = evId;
+	*(i32*)(cs->write_buf + 6) = cs->message_len;
+
+	ev->SerializeToArray(cs->write_buf + MESSAGE_HEADER_LEN, cs->message_len);
+
+	interface->send_response_message(cs);
+}
