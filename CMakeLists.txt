@@ -16,7 +16,7 @@ file(GLOB SOURCES
     "log4cpp/*.cpp"
     "ini/*.cpp"
     "threadpool/*.cpp"
-    "proto/*.cpp"
+    "proto/*.cc"
 )
 
 # 设置头文件目录
@@ -27,15 +27,14 @@ include_directories(
     ini
     threadpool
 	proto
-    ${MYSQL_INCLUDE_DIR}
+    #${MYSQL_INCLUDE_DIR}
     #${Protobuf_HEADER_DIR}
     # 如果有其他的include路径，添加到这里
 )
 
 # 添加静态库目录
 link_directories(third/lib/iniparser
-                         third/lib/log4cpp
-                         ${MYSQL_LIB_DIR}
+                         #${MYSQL_LIB_DIR}
                          #${Protobuf_LIB_DIR}
 )
 
@@ -55,23 +54,11 @@ target_link_libraries(shared_bike
 			pthread
 			event
 			protobuf
-			${MYSQL_LIB_DIR}/libmysqlclient.so
-			${MYSQL_LIB_DIR}/libmysqlclient.a
+			mysqlclient
+			#${MYSQL_LIB_DIR}/libmysqlclient.so
+			#${MYSQL_LIB_DIR}/libmysqlclient.a
 			#${Protobuf_LIBRARIES}/libprotobuf.so
 			#${Protobuf_LIB_DIR}/libprotobuf.so
 			#${Protobuf_LIB_DIR}/libprotobuf.a
 )
-
-
-
-# 查找 MySQL 库
-#find_package(MySQL REQUIRED)
-#include_directories(${MySQL_INCLUDE_DIR})
-#target_link_libraries(shared_bike ${MySQL_LIBRARIES})
-
-
-# 添加外部库的路径
-#link_directories(libiniparser
-#		   liblog4cpp
-#)
 
