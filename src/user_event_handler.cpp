@@ -1,9 +1,8 @@
-
 #include "user_event_handler.h"
-#include "threadpool/thread.h"
+#include "thread.h"
 #include "DispatchMsgService.h"
 #include "sqlconnection.h"
-#include "ini/iniconfig.h"
+#include "iniconfig.h"
 #include "user_service.h"
 
 UserEventHandler::UserEventHandler() : iEventHandler("UserEventHandler")

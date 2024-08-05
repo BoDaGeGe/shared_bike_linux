@@ -1,0 +1,3 @@
+/home/zbkang/projects/shared_bike_linux/build/CMakeFiles/rebuild_cache.dir
+/home/zbkang/projects/shared_bike_linux/build/CMakeFiles/edit_cache.dir
+/home/zbkang/projects/shared_bike_linux/build/CMakeFiles/shared_bike.dir
