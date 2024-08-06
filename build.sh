@@ -246,17 +246,21 @@ export C_INCLUDE_PATH=$MYSQL_INCLUDE_DIR:$Libevent_HEADER_DIR:$Protobuf_HEADER_D
 
 
 
-PROTO_DIR
 # 检查 proto 目录是否已创建
 if [ ! -d "$PROTO_DIR" ]; then
     echo "PROTO_DIR directory not found. exit."
     exit 1
 else
-    echo "Build directory already exists."
+    echo "proto directory already exists."
+	
+	# 返回到项目根目录
+    cd "$PROTO_DIR" || exit 1
+	rm -r bike.pb.*
     protoc -I=./ --cpp_out=./ bike.proto
 fi
 echo "proto file generate Success !!!"
-
+# 返回到项目根目录
+cd "$SCRIPT_DIR" || exit 1
 
 # 检查 Build 目录是否已创建
 if [ ! -d "$BUILD_DIR" ]; then

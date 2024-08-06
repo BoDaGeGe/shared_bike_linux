@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # 添加编译选项
-add_compile_options(-Wall -pthread)
+add_compile_options(-Wall -pthread -lprotobuf)
 
 # 设置源文件
 file(GLOB SOURCES
@@ -16,7 +16,7 @@ file(GLOB SOURCES
     "log4cpp/*.cpp"
     "ini/*.cpp"
     "threadpool/*.cpp"
-    "proto/*.cc"
+    "proto/*cc"
 )
 
 # 设置头文件目录
